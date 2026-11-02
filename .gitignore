@@ -1,0 +1,12 @@
+build/
+publish/
+app/
+work/
+.vs/
+bin/
+obj/
+*.user
+*.suo
+Thumbs.db
+# Local working history contains machine and network details.
+AGENTS.md

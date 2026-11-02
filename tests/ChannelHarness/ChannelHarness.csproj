@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType><TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../gui/ChannelControl*.cs" Link="%(Filename)%(Extension)" />
+    <Compile Include="../../gui/ChannelSettings.cs" Link="ChannelSettings.cs" />
+    <Compile Include="../../gui/MultiChannelForm*.cs" Link="%(Filename)%(Extension)" />
+    <Compile Include="../../gui/EngineProcess.cs" Link="EngineProcess.cs" />
+    <Compile Include="../../gui/SystemLoad.cs" Link="SystemLoad.cs" />
+    <Compile Include="../../gui/DiagnosticsForm*.cs" Link="%(Filename)%(Extension)" />
+  </ItemGroup>
+</Project>
