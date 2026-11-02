@@ -9,7 +9,7 @@ This is the multichannel successor to SDI Converter.
 Open `app\SdiConverter2.exe`. Requires Windows x64, .NET 8 Desktop Runtime, Blackmagic Desktop Video,
 and the NDI runtime when using NDI. NDI runtime is not bundled. No streams start automatically.
 
-Four free bidirectional ports default to three inputs and one output. Change direction per tab;
+Depending on the Blackmagic SDI card, you can configure the ports as inputs or outputs. Change direction per tab;
 choose a network source for each output. Only directions reported by the current SDK/card profile are offered.
 Desktop Video Setup controls which sub-devices/connectors are available; the application does not change
 card profiles or cabling. An SDK port is not necessarily an independently configurable physical connector.
