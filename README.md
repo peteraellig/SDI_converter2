@@ -10,7 +10,7 @@ This is the multichannel successor to SDI Converter.
 
 1. Download the ZIP (approximately 130 MiB) and extract it completely into a folder.
 2. Run `setup.exe` from that folder. Keep `Application Files` and the `.application` file alongside it.
-3. Install Blackmagic Desktop Video and, for NDI features, the NDI runtime separately.
+3. Install Blackmagic Desktop Video and, for NDI features, the free NDI Tools separately.
 
 The installer package is stored in [`install`](install) using Git LFS. To obtain the ZIP through a Git clone,
 install Git LFS and run `git lfs pull`. The direct download link above does not require Git.
