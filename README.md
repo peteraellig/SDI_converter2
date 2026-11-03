@@ -1,6 +1,9 @@
 # SDI Converter 2
 
 Windows multichannel converter: Blackmagic SDI to OMT / NDI, and OMT / NDI to SDI.
+
+![SDI Converter 2 user interface](image.png)
+
 Each active SDK port has one configurable channel and its own C++ engine process.
 This is the multichannel successor to SDI Converter.
 
