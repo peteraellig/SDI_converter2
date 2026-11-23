@@ -1,4 +1,4 @@
-# SDI Converter 2
+# SDI Converter 2 (2.0.0.1)
 
 Windows multichannel converter: Blackmagic SDI to OMT / NDI, and OMT / NDI to SDI.
 
