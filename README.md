@@ -72,3 +72,5 @@ loss/late frames and network load at intended formats. Run the intended 3-in/1-o
 
 Own code: 0BSD. See LICENSE and THIRD-PARTY-NOTICES.md. OMT retains its MIT license.
 NDI is a registered trademark of Vizrt NDI AB.
+
+Written by Peter Aellig and Claude Opus 5.5 (Anthropic).
