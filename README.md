@@ -7,16 +7,11 @@ Windows multichannel converter: Blackmagic SDI to OMT / NDI, and OMT / NDI to SD
 Each active SDK port has one configurable channel and its own C++ engine process.
 This is the multichannel successor to SDI Converter.
 
-## Installation (ClickOnce)
+## Installation (Windows x64)
 
-[Download the Windows x64 ClickOnce installer ZIP](https://media.githubusercontent.com/media/peteraellig/SDI_converter2/main/install/SDI-Converter_multichannel.zip)
-
-1. Download the ZIP (approximately 130 MiB) and extract it completely into a folder.
-2. Run `setup.exe` from that folder. Keep `Application Files` and the `.application` file alongside it.
+1. [Download the SDI Converter 2.0.0.1 installer](https://github.com/peteraellig/SDI_converter2/releases/download/v2.0.0.1/SDI-Converter2-Setup-2.0.0.1.exe).
+2. Run `SDI-Converter2-Setup-2.0.0.1.exe` and approve the administrator prompt. The installer includes the .NET and Visual C++ runtimes.
 3. Install Blackmagic Desktop Video and, for NDI features, the free NDI Tools separately.
-
-The installer package is stored in [`install`](install) using Git LFS. To obtain the ZIP through a Git clone,
-install Git LFS and run `git lfs pull`. The direct download link above does not require Git.
 
 ## Run
 
@@ -54,8 +49,7 @@ The resulting executable is `app\SdiConverter2.exe`; keep the accompanying files
 Open `SdiConverter.sln` in Visual Studio. New UI: `MultiChannelForm` and `ChannelControl`, with separate
 Designer files. The unused single-channel forms/settings have been removed. Build outputs use `%LOCALAPPDATA%\sdi_converter2`;
 settings, assembly identity and publish paths are separate from version 1.
-`scripts\build-app.ps1` builds the runnable `app` folder. A prebuilt ClickOnce package is available in the Installation section above.
-The supplied ZIP was checked for archive integrity; installation was not tested as part of its upload.
+`scripts\build-app.ps1` builds the runnable `app` folder. To build the Windows installer, run `installer\build-setup.ps1`.
 
 ## Validation
 
