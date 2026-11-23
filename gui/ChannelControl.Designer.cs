@@ -31,6 +31,9 @@ partial class ChannelControl
         statusLabel = new Label();
         formatLabel = new Label();
         detailLabel = new Label();
+        ndiLevelBox = new CheckBox();
+        autoRestartBox = new CheckBox();
+        autoStartBox = new CheckBox();
         ((System.ComponentModel.ISupportInitialize)bufferBox).BeginInit();
         SuspendLayout();
         // 
@@ -289,7 +292,42 @@ partial class ChannelControl
         detailLabel.Name = "detailLabel";
         detailLabel.Size = new Size(1010, 60);
         detailLabel.TabIndex = 24;
-        // 
+        //
+        // ndiLevelBox
+        //
+        ndiLevelBox.AutoSize = true;
+        ndiLevelBox.Font = new Font("Segoe UI", 12F);
+        ndiLevelBox.Location = new Point(350, 260);
+        ndiLevelBox.Name = "ndiLevelBox";
+        ndiLevelBox.Size = new Size(340, 27);
+        ndiLevelBox.TabIndex = 25;
+        ndiLevelBox.Text = "NDI audio at NDI reference level (+20 dB)";
+        ndiLevelBox.UseVisualStyleBackColor = true;
+        //
+        // autoRestartBox
+        //
+        autoRestartBox.Checked = true;
+        autoRestartBox.CheckState = CheckState.Checked;
+        autoRestartBox.AutoSize = true;
+        autoRestartBox.Font = new Font("Segoe UI", 12F);
+        autoRestartBox.Location = new Point(350, 140);
+        autoRestartBox.Name = "autoRestartBox";
+        autoRestartBox.Size = new Size(300, 27);
+        autoRestartBox.TabIndex = 26;
+        autoRestartBox.Text = "Restart automatically after a failure";
+        autoRestartBox.UseVisualStyleBackColor = true;
+        //
+        // autoStartBox
+        //
+        autoStartBox.AutoSize = true;
+        autoStartBox.Font = new Font("Segoe UI", 12F);
+        autoStartBox.Location = new Point(680, 140);
+        autoStartBox.Name = "autoStartBox";
+        autoStartBox.Size = new Size(300, 27);
+        autoStartBox.TabIndex = 27;
+        autoStartBox.Text = "Start when the program opens";
+        autoStartBox.UseVisualStyleBackColor = true;
+        //
         // ChannelControl
         // 
         AutoScaleDimensions = new SizeF(7F, 17F);
@@ -320,6 +358,9 @@ partial class ChannelControl
         Controls.Add(statusLabel);
         Controls.Add(formatLabel);
         Controls.Add(detailLabel);
+        Controls.Add(ndiLevelBox);
+        Controls.Add(autoRestartBox);
+        Controls.Add(autoStartBox);
         Font = new Font("Segoe UI", 10F);
         Name = "ChannelControl";
         Size = new Size(1060, 470);
@@ -352,4 +393,7 @@ partial class ChannelControl
     private Label statusLabel;
     private Label formatLabel;
     private Label detailLabel;
+    private CheckBox ndiLevelBox;
+    private CheckBox autoRestartBox;
+    private CheckBox autoStartBox;
 }

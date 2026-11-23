@@ -25,6 +25,10 @@ public sealed class ChannelSettings
     public string Audio { get; set; } = "Stereo 1&2";
     public string Duplicate { get; set; } = "Abort";
     public int Buffer { get; set; } = 3;
+    /// <summary>false = NDI audio unchanged in both directions (default); true = NDI reference level (x10 send, x0.1 receive).</summary>
+    public bool NdiReferenceLevel { get; set; }
+    public bool AutoRestart { get; set; } = true;
+    public bool AutoStart { get; set; }
 }
 
 public sealed class ChannelConfiguration

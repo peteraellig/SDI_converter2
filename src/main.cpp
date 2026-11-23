@@ -247,12 +247,12 @@ int main(int argc, char** argv) {
         const std::string command = argc > 1 ? argv[1] : "";
         if (argc == 2 && command == "--list") listDevices();
         else if (argc == 3 && command == "--modes") listModes(std::stoi(argv[2]));
-        else if (argc >= 3 && command == "--capture") // INDEX [NAME] [SECONDS] [QUALITY]
+        else if (argc >= 3 && command == "--capture") // INDEX [NAME] [SECONDS] [QUALITY] [omt|ndi|omt+ndi] [AUDIO] [DUPLICATE] [KEY] [unity|ndi]
             runCapture(std::stoi(argv[2]), argc >= 4 ? argv[3] : "SDI Converter", argc >= 5 ? std::stoi(argv[4]) : 0, argc >= 6 ? argv[5] : "Normal", argc >= 7 ? argv[6] : "omt",
-                       argc >= 8 ? argv[7] : "Stereo 1&2", argc >= 9 ? argv[8] : "abort", argc >= 10 ? argv[9] : "");
-        else if (argc >= 4 && command == "--play") // INDEX ADDRESS [SECONDS] [BUFFER] [omt|ndi]
+                       argc >= 8 ? argv[7] : "Stereo 1&2", argc >= 9 ? argv[8] : "abort", argc >= 10 ? argv[9] : "", argc >= 11 ? argv[10] : "unity");
+        else if (argc >= 4 && command == "--play") // INDEX ADDRESS [SECONDS] [BUFFER] [omt|ndi] [AUDIO] [KEY] [unity|ndi]
             runPlay(std::stoi(argv[2]), argv[3], argc >= 5 ? std::stoi(argv[4]) : 0, argc >= 6 ? std::stoi(argv[5]) : 3,
-                    argc >= 7 && std::string(argv[6]) == "ndi", argc >= 8 ? argv[7] : "Stereo 1&2", argc >= 9 ? argv[8] : "");
+                    argc >= 7 && std::string(argv[6]) == "ndi", argc >= 8 ? argv[7] : "Stereo 1&2", argc >= 9 ? argv[8] : "", argc >= 10 ? argv[9] : "unity");
         else if (argc == 2 && command == "--ndi-sources") listNdiSources();
         else if (argc >= 8 && command == "--test-source") // NAME WIDTH HEIGHT RATE_N RATE_D progressive|interlaced [SECONDS]
             runTestSource(argv[2], std::stoi(argv[3]), std::stoi(argv[4]), std::stoi(argv[5]), std::stoi(argv[6]),

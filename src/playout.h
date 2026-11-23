@@ -9,13 +9,19 @@ struct Rate { int n = 0, d = 1; };
 int64_t frameTime(int64_t index, const ModeInfo& m) { return index * 10000000 * m.rateD / m.rateN; }
 int64_t audioPosition(int64_t index, const ModeInfo& m) { return index * 48000 * m.rateD / m.rateN; }
 
+// Two frame rates are the same when they differ by less than 0.01 %. Senders write 59.94 as 60000/1001 or 5994/100; both must
+// match, while 59.94 and 60 (0.1 % apart) stay different.
+bool sameRate(int64_t n1, int64_t d1, int64_t n2, int64_t d2) {
+    if (n1 <= 0 || d1 <= 0 || n2 <= 0 || d2 <= 0) return false;
+    return std::llabs(n1 * d2 - n2 * d1) * 10000 < n2 * d1;
+}
+
 struct IncomingFormat {
     bool valid = false;
     int width = 0, height = 0, rateN = 0, rateD = 1;
     bool interlaced = false;
     bool operator==(const IncomingFormat& o) const {
-        return width == o.width && height == o.height && static_cast<int64_t>(rateN) * o.rateD == static_cast<int64_t>(o.rateN) * rateD &&
-               interlaced == o.interlaced;
+        return width == o.width && height == o.height && sameRate(rateN, rateD, o.rateN, o.rateD) && interlaced == o.interlaced;
     }
     std::string text() const {
         char buffer[120];
@@ -31,11 +37,18 @@ class Receiver {
     std::unique_ptr<ndi::Runtime> ndiRuntime;
     void* ndiHandle = nullptr;
     std::atomic<bool> active{true};
+    const float ndiAudioScale;
     std::thread worker;
     std::mutex mutex;
     IncomingFormat seen, expected;
     std::string error;
     bool changed = false;
+    // A format change only counts once the new format has arrived in `stableFrames` pictures in a row. A single odd picture
+    // (a glitch at the sender) is dropped and the output repeats the previous one instead of restarting with black.
+    static constexpr int stableFrames = 10;
+    IncomingFormat pending;
+    int pendingCount = 0;
+    std::vector<uint8_t> converted; // NDI pictures with alpha, converted to UYVY
     // NDI delivers an interlaced picture as two field frames (format type 2 then 3); the first is kept until its partner arrives.
     std::vector<uint8_t> firstField, woven;
     int firstFieldWidth = 0, firstFieldHeight = 0;
@@ -56,7 +69,8 @@ public:
     std::atomic<int64_t> lastVideo{0};
 
     // `address` is the OMT address ("HOST (name)") or, with ndiSource, the NDI source name ("HOST (name)").
-    Receiver(const std::string& address, bool ndiSource) {
+    // `ndiGain` is the NDI audio level choice (1 = unchanged, ndi::referenceGain = NDI reference level); received audio is divided by it.
+    Receiver(const std::string& address, bool ndiSource, float ndiGain = 1.0f) : ndiAudioScale(1.0f / ndiGain) {
         if (ndiSource) {
             ndiRuntime = std::make_unique<ndi::Runtime>();
             // Fields must be allowed: without it the SDK deinterlaces. Two fields are woven back into one picture in pollNdi.
@@ -82,7 +96,7 @@ public:
     }
 
     IncomingFormat seenFormat() { std::lock_guard lock(mutex); return seen; }
-    void expect(const IncomingFormat& format) { std::lock_guard lock(mutex); expected = format; changed = false; }
+    void expect(const IncomingFormat& format) { std::lock_guard lock(mutex); expected = format; changed = false; pendingCount = 0; }
     bool formatChanged() { std::lock_guard lock(mutex); return changed; }
     void checkError() { std::lock_guard lock(mutex); if (!error.empty()) throw std::runtime_error(error); }
 
@@ -109,24 +123,65 @@ private:
         const int type = ndiRuntime->recvCapture(ndiHandle, &v, &a, nullptr, 20);
         if (type == 1) {
             // The sender's timecode is the media clock shared by its video and audio.
-            const bool uyvy = v.fourcc == ('U' | ('Y' << 8) | ('V' << 16) | ('Y' << 24));
-            if ((v.formatType == 2 || v.formatType == 3) && uyvy && v.data && v.stride >= v.width * 2) weaveField(v);
-            else video({v.width, v.height, v.rateN, v.rateD, v.formatType == 0, uyvy, v.timecode, v.data, v.stride,
-                        static_cast<int64_t>(v.stride) * v.height});
+            const bool field = v.formatType == 2 || v.formatType == 3;
+            bool uyvy = v.fourcc == fourcc('U', 'Y', 'V', 'Y');
+            const uint8_t* data = v.data;
+            int stride = v.stride;
+            // A source with alpha arrives as BGRA: convert to UYVY and drop the alpha (SDI has no key channel here).
+            if (!uyvy && (v.fourcc == fourcc('B', 'G', 'R', 'A') || v.fourcc == fourcc('B', 'G', 'R', 'X')) && v.data && v.width > 0 &&
+                v.width % 2 == 0 && v.height > 0 && v.stride >= v.width * 4) {
+                bgraToUyvy(v.data, v.stride, v.width, v.height, (field ? v.height * 2 : v.height) < 720);
+                data = converted.data();
+                stride = v.width * 2;
+                uyvy = true;
+            }
+            if (field && uyvy && data && stride >= v.width * 2) weaveField(v, data, stride);
+            else video({v.width, v.height, v.rateN, v.rateD, v.formatType == 0, uyvy, v.timecode, data, stride,
+                        static_cast<int64_t>(stride) * v.height});
             ndiRuntime->freeVideo(ndiHandle, &v);
         } else if (type == 2) {
             if (a.sampleRate == 48000 && a.channels >= 1 && a.samples >= 1 && a.samples <= 24000 && a.data && a.channelStride >= a.samples * 4)
-                audio(a.timecode, a.samples, a.channels, a.data, a.channelStride / 4, 1.0f / ndi::audioGain);
+                audio(a.timecode, a.samples, a.channels, a.data, a.channelStride / 4, ndiAudioScale);
             ndiRuntime->freeAudio(ndiHandle, &a);
         }
     }
 
-    void weaveField(const ndi::VideoFrame& field) {
+    static constexpr uint32_t fourcc(char a, char b, char c, char d) {
+        return static_cast<uint8_t>(a) | (static_cast<uint8_t>(b) << 8) | (static_cast<uint8_t>(c) << 16) | (static_cast<uint32_t>(static_cast<uint8_t>(d)) << 24);
+    }
+
+    // BGRA (full range RGB) to UYVY (limited range), BT.601 for SD and BT.709 for HD; chroma is the average of each pixel pair.
+    void bgraToUyvy(const uint8_t* source, int stride, int width, int height, bool sd) {
+        const double kr = sd ? 0.299 : 0.2126, kb = sd ? 0.114 : 0.0722, kg = 1 - kr - kb;
+        const double ys = 219.0 / 255 * 65536, cs = 224.0 / 255 * 65536;
+        const int yr = static_cast<int>(std::lround(kr * ys)), yg = static_cast<int>(std::lround(kg * ys)), yb = static_cast<int>(std::lround(kb * ys));
+        const int ur = static_cast<int>(std::lround(-kr / (2 * (1 - kb)) * cs)), ug = static_cast<int>(std::lround(-kg / (2 * (1 - kb)) * cs)),
+                  ub = static_cast<int>(std::lround(0.5 * cs));
+        const int vr = static_cast<int>(std::lround(0.5 * cs)), vg = static_cast<int>(std::lround(-kg / (2 * (1 - kr)) * cs)),
+                  vb = static_cast<int>(std::lround(-kb / (2 * (1 - kr)) * cs));
+        auto clamp = [](int value) { return static_cast<uint8_t>(value < 1 ? 1 : value > 254 ? 254 : value); };
+        converted.resize(static_cast<size_t>(width) * height * 2);
+        for (int row = 0; row < height; ++row) {
+            const uint8_t* in = source + static_cast<size_t>(row) * stride;
+            uint8_t* out = converted.data() + static_cast<size_t>(row) * width * 2;
+            for (int x = 0; x < width; x += 2, in += 8, out += 4) {
+                const int b0 = in[0], g0 = in[1], r0 = in[2], b1 = in[4], g1 = in[5], r1 = in[6];
+                const int r = r0 + r1, g = g0 + g1, b = b0 + b1;
+                out[0] = clamp((ur * r + ug * g + ub * b + (128 << 17) + (1 << 16)) >> 17);
+                out[1] = clamp((yr * r0 + yg * g0 + yb * b0 + (16 << 16) + (1 << 15)) >> 16);
+                out[2] = clamp((vr * r + vg * g + vb * b + (128 << 17) + (1 << 16)) >> 17);
+                out[3] = clamp((yr * r1 + yg * g1 + yb * b1 + (16 << 16) + (1 << 15)) >> 16);
+            }
+        }
+    }
+
+    // `data`/`stride`: the field's UYVY lines (the NDI buffer itself, or `converted` for a source with alpha).
+    void weaveField(const ndi::VideoFrame& field, const uint8_t* data, int stride) {
         const size_t rowBytes = static_cast<size_t>(field.width) * 2;
         if (field.formatType == 2) { // field 0: upper lines (0, 2, 4, ...)
             firstField.resize(rowBytes * field.height);
             for (int row = 0; row < field.height; ++row)
-                std::memcpy(firstField.data() + row * rowBytes, field.data + static_cast<size_t>(row) * field.stride, rowBytes);
+                std::memcpy(firstField.data() + row * rowBytes, data + static_cast<size_t>(row) * stride, rowBytes);
             firstFieldWidth = field.width;
             firstFieldHeight = field.height;
             firstFieldTimecode = field.timecode;
@@ -136,7 +191,7 @@ private:
         woven.resize(rowBytes * field.height * 2);
         for (int row = 0; row < field.height; ++row) {
             std::memcpy(woven.data() + static_cast<size_t>(2 * row) * rowBytes, firstField.data() + row * rowBytes, rowBytes);
-            std::memcpy(woven.data() + static_cast<size_t>(2 * row + 1) * rowBytes, field.data + static_cast<size_t>(row) * field.stride, rowBytes);
+            std::memcpy(woven.data() + static_cast<size_t>(2 * row + 1) * rowBytes, data + static_cast<size_t>(row) * stride, rowBytes);
         }
         firstFieldHeight = 0;
         video({field.width, field.height * 2, field.rateN, field.rateD, true, true, firstFieldTimecode, woven.data(),
@@ -148,12 +203,18 @@ private:
         IncomingFormat now{true, in.width, in.height, in.rateN, in.rateD, in.interlaced};
         {
             std::lock_guard lock(mutex);
+            if (!expected.valid) { seen = now; return; }
+            if (!(now == expected)) {
+                if (pendingCount > 0 && now == pending) ++pendingCount;
+                else { pending = now; pendingCount = 1; }
+                if (pendingCount >= stableFrames) { seen = now; changed = true; }
+                return;
+            }
             seen = now;
-            if (!expected.valid) return;
-            if (!(now == expected)) { changed = true; return; }
+            pendingCount = 0;
         }
         if (!in.uyvy || !in.data || in.stride < in.width * 2 || in.stride > 65536 || in.dataLength < static_cast<int64_t>(in.stride) * in.height)
-            throw std::runtime_error("The source delivers no usable UYVY picture (NDI with alpha is not supported)");
+            throw std::runtime_error("The source delivers no usable UYVY picture");
         VideoPicture picture;
         picture.timestamp = in.timestamp;
         picture.pixels.resize(static_cast<size_t>(in.width) * in.height * 2);
@@ -189,8 +250,7 @@ ModeInfo pickOutputMode(IDeckLinkOutput_v14_2_1* output, const IncomingFormat& i
         CComPtr<IDeckLinkDisplayMode> display;
         if (iterator->Next(&display) != S_OK) break;
         ModeInfo mode = describe(display);
-        if (mode.width != in.width || mode.height != in.height || mode.interlaced != in.interlaced ||
-            static_cast<int64_t>(mode.rateN) * in.rateD != static_cast<int64_t>(in.rateN) * mode.rateD)
+        if (mode.width != in.width || mode.height != in.height || mode.interlaced != in.interlaced || !sameRate(in.rateN, in.rateD, mode.rateN, mode.rateD))
             continue;
         BMDDisplayMode actual = mode.id;
         long ok = 0;
@@ -198,7 +258,8 @@ ModeInfo pickOutputMode(IDeckLinkOutput_v14_2_1* output, const IncomingFormat& i
                                          bmdSupportedVideoModeDefault, &actual, &ok) == S_OK && ok)
             return mode;
     }
-    throw std::runtime_error("No SDI output mode for the incoming picture: " + in.text());
+    throw std::runtime_error("No SDI output mode for the incoming picture: " + in.text() +
+                             ". Pictures are not scaled; set the source to a size and frame rate the card can output");
 }
 
 struct AudioOut {
@@ -225,12 +286,28 @@ class Player : public IDeckLinkVideoOutputCallback_v14_2_1 {
     bool havePrevious = false;
     const AudioOut audioOut;
     const int audioChannels;
-    int64_t origin = 0, index = 0;
+    // Clock following: the card and the sender run on different clocks. Instead of jumping when they drift apart, the source
+    // time read per output frame is scaled by `ratio` (at most +-0.1 %, inaudible) so that the newest received picture stays
+    // `lag` ahead of what is played. Video picks the picture nearest to the scaled time, audio is resampled to it.
+    int64_t origin = 0, index = 0, lag = 0;
+    double videoOffset = 0, audioOffset = 0; // source time (100 ns) after `origin` for the next frame's video / audio
+    double filteredError = 0;
     uint64_t generation = 0;
+    static constexpr double maxCorrection = 0.001;     // +-1000 ppm
+    static constexpr double correctionTicks = 3.0e8;   // an error of 30 s worth of ticks would need full correction: gentle P control
+
+    void anchor(int64_t newest) {
+        origin = newest - lag;
+        videoOffset = audioOffset = 0;
+        filteredError = 0;
+        ratio = 1.0;
+        havePrevious = false;
+    }
 
 public:
     std::atomic<uint64_t> completed{0}, late{0}, dropped{0};
     uint64_t repeated = 0, black = 0, silentSamples = 0, resyncs = 0, scheduled = 0;
+    double ratio = 1.0, lagError = 0; // for the health report
 
     Player(CComPtr<IDeckLinkOutput_v14_2_1> value, const ModeInfo& mode, int depth, const AudioOut& target)
         : output(value), format(mode), bufferFrames(depth), audioOut(target), audioChannels(target.firstChannel > 1 || target.mono ? 8 : 2) {}
@@ -279,17 +356,24 @@ public:
         unsigned int pending = 0;
         check(output->GetBufferedVideoFrameCount(&pending), "Read output buffer");
         const int64_t period = frameTime(1, format);
+        const double exactPeriod = 10000000.0 * format.rateD / format.rateN;
         while (pending < static_cast<unsigned int>(bufferFrames)) {
             auto state = receiver.buffer.state();
-            int64_t target = origin + frameTime(index, format);
+            int64_t target = origin + std::llround(videoOffset);
             const bool signal = receiver.lastVideo > 0 && Capture::nowMs() - receiver.lastVideo < 500;
-            if (state.generation != generation || (started && signal && (state.last > target + period * 8 || state.last < target - period * 5))) {
-                origin = state.last - period * 2 - frameTime(index, format);
-                target = origin + frameTime(index, format);
+            // Hard re-anchor only for a new stream or an error the gentle correction cannot catch up with.
+            const int64_t error = state.last - target - lag;
+            if (state.generation != generation || (started && signal && (error > period * 6 || state.last < target - period * 3))) {
+                anchor(state.last);
+                target = origin;
                 generation = state.generation;
                 ++resyncs;
-                havePrevious = false;
+            } else if (started && signal) {
+                // Low-pass the error (the newest timestamp jumps by one frame per arrival), then steer the read speed.
+                filteredError += (static_cast<double>(error) - filteredError) * 0.02;
+                ratio = 1.0 + std::clamp(filteredError / correctionTicks, -maxCorrection, maxCorrection);
             }
+            lagError = static_cast<double>(error);
             Slot* free = nullptr;
             for (auto& slot : slots) {
                 bool expected = false;
@@ -309,7 +393,9 @@ public:
                 ++black;
             }
             const int samples = static_cast<int>(audioPosition(index + 1, format) - audioPosition(index, format));
-            free->audio = receiver.buffer.sound(target, samples, silentSamples);
+            free->audio = receiver.buffer.sound(origin, audioOffset, ratio, samples, silentSamples);
+            audioOffset += samples * ratio * 10000000.0 / 48000.0;
+            videoOffset += exactPeriod * ratio;
             if (!signal || audioOut.off) std::fill(free->audio.begin(), free->audio.end(), 0);
             if (audioChannels > 2 || audioOut.mono) { // route to the chosen SDI channels, all others stay silent
                 std::vector<int32_t> wide(static_cast<size_t>(samples) * audioChannels, 0);
@@ -333,7 +419,8 @@ public:
     }
     void start(Receiver& receiver) {
         auto state = receiver.buffer.state();
-        origin = state.last - frameTime(bufferFrames - 1, format);
+        lag = frameTime(bufferFrames - 1, format);
+        anchor(state.last);
         generation = state.generation;
         fill(receiver);
         check(output->EndAudioPreroll(), "End audio preroll");
@@ -347,8 +434,7 @@ public:
         const int64_t frame = streamTime / format.rateD;
         if (frame >= index) { // The card ran past what was scheduled: skip ahead and re-anchor.
             index = frame + bufferFrames;
-            auto state = receiver.buffer.state();
-            origin = state.last - 2 * frameTime(1, format) - frameTime(index, format);
+            anchor(receiver.buffer.state().last);
             ++resyncs;
         }
         fill(receiver);
@@ -387,8 +473,9 @@ bool playSession(Receiver& receiver, IDeckLink* device, const IncomingFormat& in
     while (running && receiver.buffer.state().count < static_cast<size_t>(depth)) {
         receiver.checkError();
         if (stopRequested()) { running = false; return false; }
-        if (receiver.formatChanged()) return true;
-        if (Capture::nowMs() - begin > 15000) throw std::runtime_error("Not enough OMT video received to start the SDI output");
+        if (receiver.formatChanged()) { std::cout << "Incoming format changed; restarting the output\n"; return true; }
+        // The source stalled before enough pictures arrived: go back to waiting for it instead of giving up.
+        if (Capture::nowMs() - begin > 15000) { std::cout << "Notice: source stalled before the output could start; waiting again\n"; return true; }
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
     if (!running) return false;
@@ -403,7 +490,7 @@ bool playSession(Receiver& receiver, IDeckLink* device, const IncomingFormat& in
         while (running && (seconds == 0 || Capture::nowMs() - startedAt < static_cast<int64_t>(seconds) * 1000)) {
             receiver.checkError();
             if (stopRequested()) { running = false; break; }
-            if (receiver.formatChanged()) { changed = true; break; }
+            if (receiver.formatChanged()) { changed = true; std::cout << "Incoming format changed; restarting the output\n"; break; }
             player->tick(receiver);
             auto now = Capture::nowMs();
             if (now - lastReport >= 1000) {
@@ -414,6 +501,7 @@ bool playSession(Receiver& receiver, IDeckLink* device, const IncomingFormat& in
                           << ",\"queueDrops\":" << state.discarded << ",\"completed\":" << player->completed << ",\"late\":" << player->late
                           << ",\"dropped\":" << player->dropped << ",\"repeated\":" << player->repeated << ",\"black\":" << player->black
                           << ",\"silentSamples\":" << player->silentSamples << ",\"resyncs\":" << player->resyncs
+                          << ",\"clockPpm\":" << std::llround((player->ratio - 1.0) * 1e6) << ",\"lagErrorMs\":" << std::llround(player->lagError / 10000.0)
                           << ",\"buffered\":" << player->buffered() << "}\n";
             }
         }
@@ -437,8 +525,11 @@ AudioOut parseOutputAudio(const std::string& text) {
     throw std::runtime_error("SDI audio must be Off, Stereo 1&2, 3&4, 5&6, 7&8 or Mono 1..8");
 }
 
-void runPlay(int outputIndex, const std::string& address, int seconds, int depth, bool ndiSource, const std::string& audioText, const std::string& expectedKey) {
+void runPlay(int outputIndex, const std::string& address, int seconds, int depth, bool ndiSource, const std::string& audioText, const std::string& expectedKey,
+             const std::string& ndiLevel) {
     const AudioOut audioOut = parseOutputAudio(audioText);
+    const float ndiGain = ndi::parseAudioLevel(ndiLevel);
+    if (depth < 2 || depth > 10) throw std::runtime_error("Output buffer must be 2 to 10 frames");
     auto all = devices();
     IDeckLink* device = deviceAt(all, outputIndex);
     const auto key = deviceKey(device, outputIndex);
@@ -450,15 +541,21 @@ void runPlay(int outputIndex, const std::string& address, int seconds, int depth
     __int64 busy = 0;
     if (status && status->GetInt(bmdDeckLinkStatusBusy, &busy) == S_OK && busy) throw std::runtime_error("Port is busy (used by another program)");
     if (!capable(device, bmdDeviceSupportsPlayback)) throw std::runtime_error("Selected device is not configured for playback; check Desktop Video Setup");
-    Receiver receiver(address, ndiSource);
+    Receiver receiver(address, ndiSource, ndiGain);
     int64_t startedAt = 0;
+    const auto runBegin = Capture::nowMs(); // SECONDS (test runs) also limits waiting; the GUI passes 0 = unlimited
     do {
-        const auto begin = Capture::nowMs();
+        // Wait as long as it takes for the source (it may start after the converter); the port stays reserved meanwhile.
+        auto lastNotice = Capture::nowMs() - 60000;
         IncomingFormat incoming;
         while (running && !(incoming = receiver.seenFormat()).valid) {
             receiver.checkError();
             if (stopRequested()) return;
-            if (Capture::nowMs() - begin > 15000) throw std::runtime_error(std::string("No ") + (ndiSource ? "NDI" : "OMT") + " video received within 15 seconds; no SDI output started");
+            if (seconds && Capture::nowMs() - runBegin >= static_cast<int64_t>(seconds) * 1000) { std::cout << "Stopped\n"; return; }
+            if (Capture::nowMs() - lastNotice >= 10000) {
+                std::cout << "Notice: waiting for " << (ndiSource ? "NDI" : "OMT") << " source " << address << "\n";
+                lastNotice = Capture::nowMs();
+            }
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
         if (!running) break;
@@ -466,7 +563,6 @@ void runPlay(int outputIndex, const std::string& address, int seconds, int depth
         std::this_thread::sleep_for(std::chrono::milliseconds(300));
         incoming = receiver.seenFormat();
         if (!playSession(receiver, device, incoming, seconds, depth, audioOut, startedAt)) break;
-        std::cout << "Incoming format changed; restarting the output\n";
     } while (running);
     std::cout << "Stopped\n";
 }
@@ -507,8 +603,8 @@ void runTestSource(const std::string& name, int width, int height, int rateN, in
         v.Flags = interlaced ? OMTVideoFlags_Interlaced : OMTVideoFlags_None;
         v.FrameRateN = rateN;
         v.FrameRateD = rateD;
-        v.AspectRatio = 16.0f / 9;
-        v.ColorSpace = OMTColorSpace_BT709;
+        v.AspectRatio = height < 720 ? 4.0f / 3 : 16.0f / 9;
+        v.ColorSpace = height < 720 ? OMTColorSpace_BT601 : OMTColorSpace_BT709;
         v.Timestamp = frameTime(frameIndex, timing);
         v.Data = videoPacket.video.data();
         v.DataLength = static_cast<int>(pixels.size());

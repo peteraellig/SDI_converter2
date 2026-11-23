@@ -30,8 +30,15 @@ struct RecvSettings { Source source; int colorFormat; int bandwidth; bool allowF
 
 constexpr int colorFormatUyvyBgra = 1; // UYVY when there is no alpha
 constexpr int bandwidthHighest = 100;
-// NDI float audio has 1.0 at the +4 dBu reference, 20 dB below digital full scale (same convention as the FastVideo Bridge).
-constexpr float audioGain = 10.0f;
+// NDI float audio by the NDI convention has 1.0 at the +4 dBu reference, 20 dB below digital full scale (as in the FastVideo Bridge).
+// Many receivers (vMix) treat NDI float as plain full scale instead, so the level is a per-channel choice:
+// "unity" (default) sends and receives the samples unchanged, "ndi" applies x10 on send and x0.1 on receive.
+constexpr float referenceGain = 10.0f;
+inline float parseAudioLevel(const std::string& text) {
+    if (text == "unity") return 1.0f;
+    if (text == "ndi") return referenceGain;
+    throw std::runtime_error("NDI audio level must be unity or ndi");
+}
 
 class Runtime {
     HMODULE library = nullptr;

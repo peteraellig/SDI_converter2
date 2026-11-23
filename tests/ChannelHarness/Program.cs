@@ -39,9 +39,11 @@ internal static class Program
                 Environment.SetEnvironmentVariable("SDI_TEST_CASE", "removed");
                 await channels[0].StartAsync(); Check(!channels[0].Active && channels[0].Status.Contains("disconnected"), "Disconnected port is rejected");
                 Environment.SetEnvironmentVariable("SDI_TEST_CASE", "reorder");
+                ((CheckBox)channels[0].Controls.Find("ndiLevelBox", true).Single()).Checked = true;
                 await channels[0].StartAsync(); await Task.Delay(150);
                 var command = JsonSerializer.Deserialize<string[]>(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "evidence", "args-3.json")))!;
-                Check(command[1] == "3" && command[^1] == "fixture-0", "Reordered enumeration is resolved through persistent identity");
+                Check(command[1] == "3" && command[^2] == "fixture-0", "Reordered enumeration is resolved through persistent identity");
+                Check(command[^1] == "ndi", "NDI reference level reaches the engine");
                 await channels[0].StopAsync();
                 Environment.SetEnvironmentVariable("SDI_TEST_CASE", "slow");
                 var start = channels[0].StartAsync(); var stop = channels[0].StopAsync(); await Task.WhenAll(start, stop);
@@ -49,11 +51,21 @@ internal static class Program
                 Environment.SetEnvironmentVariable("SDI_TEST_CASE", null);
                 channels[0].Controls.Find("senderBox", true).Single().Text = "crash";
                 await channels[0].StartAsync(); await Task.Delay(300);
-                Check(!channels[0].Active && channels[0].Status.Contains("Synthetic startup failure"), "Immediate engine failure returns the channel to idle");
+                Check(channels[0].Active && channels[0].Status.Contains("Synthetic startup failure") && channels[0].Status.Contains("restarting in 3 s"),
+                      "Engine failure schedules an automatic restart");
+                await Task.Delay(3500);
+                Check(channels[0].Active && channels[0].Status.Contains("restarting in 6 s"), "Automatic restart runs and backs off while failing");
+                await channels[0].StopAsync();
+                Check(!channels[0].Active && channels[0].Status == "Stopped", "Stop cancels a pending restart");
+                ((CheckBox)channels[0].Controls.Find("autoRestartBox", true).Single()).Checked = false;
+                await channels[0].StartAsync(); await Task.Delay(300);
+                Check(!channels[0].Active && channels[0].Status.Contains("Synthetic startup failure"), "Without auto restart a failure returns the channel to idle");
                 channels[0].Controls.Find("senderBox", true).Single().Text = "";
                 await channels[0].StartAsync(); Check(!channels[0].Active && channels[0].Status.Contains("sender name"), "Missing configuration does not launch an engine");
                 var saved = JsonSerializer.Deserialize<ChannelConfiguration>(File.ReadAllText(config.StoragePath))!;
                 Check(saved.Channels.Count == 4 && saved.Channels["fixture-3"].Source == "TEST (source)", "Independent channel settings persist");
+                Check(saved.Channels["fixture-0"].NdiReferenceLevel && !saved.Channels["fixture-0"].AutoRestart && saved.Channels["fixture-1"].AutoRestart,
+                      "NDI level and auto restart choices persist per channel");
                 Console.WriteLine("PASS: all channel integration checks");
             }
             catch (Exception ex) { Console.Error.WriteLine(ex); Environment.ExitCode = 1; }

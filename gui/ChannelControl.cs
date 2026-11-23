@@ -16,9 +16,14 @@ public partial class ChannelControl : UserControl
     private readonly SystemLoad load = new();
     private long previousLoss;
     private bool recentLoss;
+    // Automatic restart after a failure: waits 3 s, doubling up to 30 s while the engine keeps failing quickly.
+    private CancellationTokenSource? restartPending;
+    private int restartDelay;
+    private long engineStartedAt;
     public event Action? Changed;
     public event Action? SettingsChanged;
-    public bool Active => engine != null || transitioning;
+    public bool Active => engine != null || transitioning || restartPending != null;
+    public bool AutoStart => autoStartBox.Checked;
     public string Key => device!.Key;
     public string DeviceName => device!.Name;
     public string Direction => directionBox.Text;
@@ -34,7 +39,8 @@ public partial class ChannelControl : UserControl
         InitializeComponent();
         if (LicenseManager.UsageMode == LicenseUsageMode.Designtime) return;
         directionBox.SelectedIndexChanged += (_, _) => UpdateInputs();
-        kindBox.SelectedIndexChanged += (_, _) => { sourceBox.Items.Clear(); };
+        kindBox.SelectedIndexChanged += (_, _) => { sourceBox.Items.Clear(); UpdateInputs(); };
+        outputBox.SelectedIndexChanged += (_, _) => UpdateInputs();
         startButton.Click += async (_, _) => { if (Active) await StopAsync(); else await StartAsync(); };
         findButton.Click += async (_, _) => await FindAsync();
         logButton.Click += (_, _) =>
@@ -56,6 +62,9 @@ public partial class ChannelControl : UserControl
         Select(outputBox, settings.Output); Select(kindBox, settings.SourceKind);
         Select(qualityBox, settings.Quality); Select(audioBox, settings.Audio); Select(duplicateBox, settings.Duplicate);
         bufferBox.Value = Math.Clamp(settings.Buffer, 3, 8);
+        ndiLevelBox.Checked = settings.NdiReferenceLevel;
+        autoRestartBox.Checked = settings.AutoRestart;
+        autoStartBox.Checked = settings.AutoStart;
         statusLabel.Text = device.Busy is > 0 ? "Port busy in another application" : device.Busy is null ? "Port availability unknown" : "Ready";
         UpdateInputs();
     }
@@ -71,7 +80,10 @@ public partial class ChannelControl : UserControl
         Quality = qualityBox.Text,
         Audio = audioBox.Text,
         Duplicate = duplicateBox.Text,
-        Buffer = (int)bufferBox.Value
+        Buffer = (int)bufferBox.Value,
+        NdiReferenceLevel = ndiLevelBox.Checked,
+        AutoRestart = autoRestartBox.Checked,
+        AutoStart = autoStartBox.Checked
     };
 
     private void UpdateInputs()
@@ -81,12 +93,15 @@ public partial class ChannelControl : UserControl
         senderBox.Enabled = outputBox.Enabled = qualityBox.Enabled = duplicateBox.Enabled = idle && input;
         kindBox.Enabled = sourceBox.Enabled = findButton.Enabled = bufferBox.Enabled = idle && !input;
         audioBox.Enabled = idle;
+        ndiLevelBox.Enabled = idle && (input ? outputBox.Text.Contains("NDI") : kindBox.Text == "NDI");
         startButton.Enabled = !transitioning && !discovering && directionBox.Items.Count > 0;
         startButton.Text = Active ? "Stop channel" : "Start channel";
         Changed?.Invoke();
     }
 
-    public async Task StartAsync()
+    public async Task StartAsync() { restartDelay = 0; await StartAsync(false); }
+
+    private async Task StartAsync(bool automatic)
     {
         if (Active || discovering || device is null) return;
         transitioning = true; UpdateInputs();
@@ -103,11 +118,12 @@ public partial class ChannelControl : UserControl
             if (settings.Direction == "Input" ? !current.Capture : !current.Playback)
                 throw new InvalidOperationException("Direction is unavailable in the current card profile. Refresh ports.");
             device = current;
+            var ndiLevel = settings.NdiReferenceLevel ? "ndi" : "unity";
             string[] args = settings.Direction == "Input"
                 ? new[] { "--capture", current.Index.ToString(CultureInfo.InvariantCulture), settings.Sender, "0", settings.Quality,
                     settings.Output == "OMT + NDI" ? "omt+ndi" : settings.Output.ToLowerInvariant(), settings.Audio,
-                    settings.Duplicate switch { "Add a number" => "increment", "Retry until free" => "retry", "Retry 10 minutes" => "retry10", _ => "abort" }, Key }
-                : new[] { "--play", current.Index.ToString(CultureInfo.InvariantCulture), settings.Source, "0", settings.Buffer.ToString(CultureInfo.InvariantCulture), settings.SourceKind.ToLowerInvariant(), settings.Audio, Key };
+                    settings.Duplicate switch { "Add a number" => "increment", "Retry until free" => "retry", "Retry 10 minutes" => "retry10", _ => "abort" }, Key, ndiLevel }
+                : new[] { "--play", current.Index.ToString(CultureInfo.InvariantCulture), settings.Source, "0", settings.Buffer.ToString(CultureInfo.InvariantCulture), settings.SourceKind.ToLowerInvariant(), settings.Audio, Key, ndiLevel };
             SettingsChanged?.Invoke();
             log.Clear(); previousLoss = 0; recentLoss = false; lastError = ""; stopping = false;
             formatLabel.Text = detailLabel.Text = "";
@@ -120,18 +136,44 @@ public partial class ChannelControl : UserControl
             {
                 if (engine != created) return;
                 engine = null; created.Dispose(); recentLoss = false;
-                statusLabel.Text = stopping || code == 0 ? "Stopped" : "Error: " + (lastError.Length > 0 ? lastError : $"engine exited ({code})");
+                var reason = lastError.Length > 0 ? lastError : $"engine exited ({code})";
+                if (stopping || code == 0) statusLabel.Text = "Stopped";
+                else if (autoRestartBox.Checked) ScheduleRestart(reason, Environment.TickCount64 - engineStartedAt > 60000);
+                else statusLabel.Text = "Error: " + reason;
                 stopping = false; UpdateInputs();
             });
+            engineStartedAt = Environment.TickCount64;
             created.Start();
-            statusLabel.Text = "Starting …";
+            statusLabel.Text = automatic ? "Restarting …" : "Starting …";
         }
         catch (Exception ex)
         {
-            engine?.Dispose(); engine = null; statusLabel.Text = "Cannot start: " + ex.Message;
-            log.AppendText(statusLabel.Text + Environment.NewLine);
+            engine?.Dispose(); engine = null;
+            if (automatic && autoRestartBox.Checked) ScheduleRestart(ex.Message, false);
+            else statusLabel.Text = "Cannot start: " + ex.Message;
+            log.AppendText("Cannot start: " + ex.Message + Environment.NewLine);
         }
         finally { transitioning = false; UpdateInputs(); }
+    }
+
+    // A failed channel keeps its port and settings and tries again until the user stops it.
+    private void ScheduleRestart(string reason, bool ranLong)
+    {
+        restartDelay = ranLong ? 3 : Math.Min(Math.Max(restartDelay * 2, 3), 30);
+        var pending = new CancellationTokenSource();
+        restartPending = pending;
+        statusLabel.Text = $"Error: {reason} · restarting in {restartDelay} s";
+        log.AppendText($"{DateTime.Now:HH:mm:ss} {statusLabel.Text}{Environment.NewLine}");
+        _ = RestartAfterAsync(restartDelay, pending);
+    }
+
+    private async Task RestartAfterAsync(int seconds, CancellationTokenSource pending)
+    {
+        try { await Task.Delay(TimeSpan.FromSeconds(seconds), pending.Token); }
+        catch (OperationCanceledException) { return; }
+        if (IsDisposed || restartPending != pending) return;
+        restartPending = null; pending.Dispose();
+        await StartAsync(true);
     }
 
     private void Post(Action action)
@@ -142,10 +184,15 @@ public partial class ChannelControl : UserControl
 
     public async Task StopAsync()
     {
+        if (restartPending is { } pending)
+        {
+            restartPending = null; pending.Cancel(); pending.Dispose();
+            if (engine is null && !transitioning) { statusLabel.Text = "Stopped"; UpdateInputs(); return; }
+        }
         // A start preflight must finish before Stop all / closing can complete.
         while (transitioning) await Task.Delay(25);
         var current = engine;
-        if (current is null) return;
+        if (current is null) { UpdateInputs(); return; }
         transitioning = true; stopping = true; statusLabel.Text = "Stopping …"; UpdateInputs();
         try
         {

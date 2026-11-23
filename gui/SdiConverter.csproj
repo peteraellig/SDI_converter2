@@ -14,10 +14,10 @@
     <Authors>Peter Aellig</Authors>
     <Company>Peter Aellig</Company>
     <Copyright>Peter Aellig</Copyright>
-    <Version>2.0.0.0</Version>
-    <AssemblyVersion>2.0.0.0</AssemblyVersion>
-    <FileVersion>2.0.0.0</FileVersion>
-    <InformationalVersion>2.0.0.0</InformationalVersion>
+    <Version>2.0.0.1</Version>
+    <AssemblyVersion>2.0.0.1</AssemblyVersion>
+    <FileVersion>2.0.0.1</FileVersion>
+    <InformationalVersion>2.0.0.1</InformationalVersion>
     <ApplicationIcon>Branding\sdi_converter.ico</ApplicationIcon>
     <!-- The engine is built by CMake into the local build tree (not on the NAS). -->
     <EngineDir Condition="'$(EngineDir)' == ''">$(LOCALAPPDATA)\sdi_converter2\build\Release\</EngineDir>

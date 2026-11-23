@@ -30,23 +30,10 @@ public partial class MultiChannelForm : Form
     {
         Text = $"SDI Converter 2 | {GetType().Assembly.GetName().Version} | Peter Aellig";
         Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
-        Shown += async (_, _) => await RefreshPortsAsync();
+        // Channels marked "Start when the program opens" start once after the first port scan (not on later refreshes).
+        Shown += async (_, _) => { await RefreshPortsAsync(); await StartChannelsAsync(c => c.AutoStart); };
         refreshButton.Click += async (_, _) => await RefreshPortsAsync();
-        startAllButton.Click += async (_, _) =>
-        {
-            if (batch || refreshing || closing) return;
-            batch = true; cancelBatch = false; UpdateButtons();
-            try
-            {
-                // Stagger startup and SDK enumeration; running channels remain independent.
-                foreach (var channel in channels)
-                {
-                    if (closing || cancelBatch) break;
-                    if (!channel.Active) await channel.StartAsync();
-                }
-            }
-            finally { batch = false; UpdateButtons(); }
-        };
+        startAllButton.Click += async (_, _) => await StartChannelsAsync(_ => true);
         stopAllButton.Click += async (_, _) =>
         {
             if (refreshing || closing || cancelBatch) return;
@@ -78,6 +65,22 @@ public partial class MultiChannelForm : Form
         FormClosing += CloseAsync;
         timer.Tick += (_, _) => SampleLoad(); timer.Start();
         FormClosed += (_, _) => { timer.Dispose(); foreach (var c in channels) c.CloseDiagnostics(); };
+    }
+
+    private async Task StartChannelsAsync(Func<ChannelControl, bool> which)
+    {
+        if (batch || refreshing || closing) return;
+        batch = true; cancelBatch = false; UpdateButtons();
+        try
+        {
+            // Stagger startup and SDK enumeration; running channels remain independent.
+            foreach (var channel in channels.ToArray())
+            {
+                if (closing || cancelBatch) break;
+                if (!channel.Active && which(channel)) await channel.StartAsync();
+            }
+        }
+        finally { batch = false; UpdateButtons(); }
     }
 
     private void UpdateButtons()

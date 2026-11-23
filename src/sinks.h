@@ -52,9 +52,11 @@ class NdiSink : public Sink {
     ndi::Runtime runtime;
     void* handle = nullptr;
     std::string label;
+    const float gain;           // 1 = samples unchanged, ndi::referenceGain = NDI reference level (+20 dB)
+    std::vector<float> scaled;  // the packet is shared with the OMT sink, so the gain goes onto a copy
 
 public:
-    explicit NdiSink(const std::string& name) {
+    explicit NdiSink(const std::string& name, float audioGain = 1.0f) : gain(audioGain) {
         // The pictures are paced by the SDI input, so NDI must not clock them a second time.
         ndi::SendSettings settings{name.c_str(), nullptr, false, false};
         handle = runtime.sendCreate(&settings);
@@ -85,9 +87,12 @@ public:
             audio.channels = 2;
             audio.samples = count;
             audio.timecode = packet.frame.Timestamp;
-            // Preserve the SDI/OMT sample level for the vMix NDI output path.
-            // The previous x10 gain added an unwanted 20 dB at the receiver.
-            audio.data = packet.audio.data();
+            // Unity keeps the SDI/OMT sample level (what vMix expects); the NDI reference level adds 20 dB.
+            if (gain != 1.0f) {
+                scaled.resize(packet.audio.size());
+                for (size_t i = 0; i < scaled.size(); ++i) scaled[i] = packet.audio[i] * gain;
+                audio.data = scaled.data();
+            } else audio.data = packet.audio.data();
             audio.channelStride = count * 4;
             runtime.sendAudio(handle, &audio);
         }

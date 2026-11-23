@@ -223,8 +223,10 @@ private:
         p.frame.Flags = now.interlaced ? OMTVideoFlags_Interlaced : OMTVideoFlags_None;
         p.frame.FrameRateN = now.rateN;
         p.frame.FrameRateD = now.rateD;
-        p.frame.AspectRatio = 16.0f / 9;
-        p.frame.ColorSpace = OMTColorSpace_BT709;
+        // SD (PAL/NTSC) is 4:3 with BT.601 colours; HD and larger is 16:9 with BT.709. Anamorphic 16:9 SD is not signalled on SDI here.
+        const bool sd = p.frame.Height < 720;
+        p.frame.AspectRatio = sd ? 4.0f / 3 : 16.0f / 9;
+        p.frame.ColorSpace = sd ? OMTColorSpace_BT601 : OMTColorSpace_BT709;
         p.frame.DataLength = p.frame.Stride * p.frame.Height;
         const auto raw = timestamp;
         p.frame.Timestamp = stamp(timestamp, duration);
@@ -357,8 +359,9 @@ std::string freeOmtName(const std::string& wanted, const std::string& policy) {
 }
 
 void runCapture(int index, const std::string& name, int seconds, const std::string& qualityName, const std::string& outputs,
-                const std::string& audioText, const std::string& duplicate, const std::string& expectedKey) {
+                const std::string& audioText, const std::string& duplicate, const std::string& expectedKey, const std::string& ndiLevel) {
     const AudioRoute audioRoute = parseAudioRoute(audioText);
+    const float ndiGain = ndi::parseAudioLevel(ndiLevel);
     auto quality = parseQuality(qualityName);
     auto all = devices();
     IDeckLink* device = deviceAt(all, index);
@@ -381,7 +384,7 @@ void runCapture(int index, const std::string& name, int seconds, const std::stri
     }
     SinkGroup sinks;
     if (outputs == "omt" || outputs == "omt+ndi") sinks.add(std::make_unique<OmtSink>(streamName, quality));
-    if (outputs == "ndi" || outputs == "omt+ndi") sinks.add(std::make_unique<NdiSink>(streamName));
+    if (outputs == "ndi" || outputs == "omt+ndi") sinks.add(std::make_unique<NdiSink>(streamName, ndiGain));
     CComPtr<Capture> callback;
     callback.Attach(new Capture(sinks, input, initial, audioRoute));
     struct Stop {
