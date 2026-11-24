@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.0.0.2 (2026-12-23)
+Latencies measured and optimized: 
+## SDI → OMT: 
+about 1 frame, or roughly 20 ms. It can’t be any shorter, because the card doesn’t output a frame until it has been received in its entirety. Compression with VMX and transmission take only a few milliseconds.
+## OMT → SDI:
+Over SDI, a frame arrives line by line, spread out over the entire frame duration. At 50p, that’s 20 ms. The card writes the lines to memory and doesn’t output the frame until the last line is there. Blackmagic’s programming interface only delivers complete frames.
+The card transmits continuously at its own clock rate. Once a frame has finished transmitting, the next one must already be fully available; otherwise, there will be a black screen or a repeated frame. Added to this is the buffer margin, since the transmitter and the SDI card cannot operate at the same clock rate. Connecting the card to genlock does not change this.
+
+Previously approx. 80 ms
+New buffer settings (test them yourself)
+3  60 ms
+2  40 ms
+
+
 ## 2.0.0.1 (2026-11-23)
 
 - **NDI audio level.** Each channel has a new audio-level checkbox. By default, the audio level stays unchanged. Selecting the checkbox applies the NDI reference level (+20 dB). Both settings preserve the audio level on a round trip between SDI and NDI.
