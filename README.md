@@ -2,8 +2,8 @@
 
 Windows multichannel converter: Blackmagic SDI to OMT / NDI, and OMT / NDI to SDI.
 Latency: 
-approx. 20 ms from SDI to OMT.
-approx. 40–60 ms from OMT to SDI.
+approx. 20 ms from SDI to OMT.\
+approx. 40–60 ms from OMT to SDI.\
 
 ![SDI Converter 2 user interface](image.png)
 
