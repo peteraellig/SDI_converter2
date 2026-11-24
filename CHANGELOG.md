@@ -10,7 +10,7 @@ The card transmits continuously at its own clock rate. Once a frame has finished
 
 Previously approx. 80 ms
 New buffer settings (test them yourself)
-Buffer 3 = ~60 ms
+Buffer 3 = ~60 ms, 
 Buffer 2 = ~40 ms
 
 
