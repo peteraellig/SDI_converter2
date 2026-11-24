@@ -1,6 +1,9 @@
 # Changelog
 
 ## 2.0.0.2 (2026-12-23)
+
+Note: I'm only talking about Blackmagic SDI cards here; the test was conducted using a DeckLink Duo2 in a Thunderbolt 2 dock. Other SDI brands and their drivers may behave differently. 
+
 Latencies measured and optimized: 
 ## SDI → OMT: 
 about 1 frame, or roughly 20 ms. It can’t be any shorter, because the card doesn’t output a frame until it has been received in its entirety. Compression with VMX and transmission take only a few milliseconds.
