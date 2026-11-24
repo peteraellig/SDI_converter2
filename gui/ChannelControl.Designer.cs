@@ -235,7 +235,7 @@ partial class ChannelControl
         bufferBox.Font = new Font("Segoe UI", 12F);
         bufferBox.Location = new Point(900, 262);
         bufferBox.Maximum = new decimal(new int[] { 8, 0, 0, 0 });
-        bufferBox.Minimum = new decimal(new int[] { 3, 0, 0, 0 });
+        bufferBox.Minimum = new decimal(new int[] { 2, 0, 0, 0 });
         bufferBox.Name = "bufferBox";
         bufferBox.Size = new Size(130, 29);
         bufferBox.TabIndex = 19;

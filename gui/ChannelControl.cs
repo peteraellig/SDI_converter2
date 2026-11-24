@@ -61,7 +61,7 @@ public partial class ChannelControl : UserControl
         sourceBox.Text = settings.Source;
         Select(outputBox, settings.Output); Select(kindBox, settings.SourceKind);
         Select(qualityBox, settings.Quality); Select(audioBox, settings.Audio); Select(duplicateBox, settings.Duplicate);
-        bufferBox.Value = Math.Clamp(settings.Buffer, 3, 8);
+        bufferBox.Value = Math.Clamp(settings.Buffer, 2, 8);
         ndiLevelBox.Checked = settings.NdiReferenceLevel;
         autoRestartBox.Checked = settings.AutoRestart;
         autoStartBox.Checked = settings.AutoStart;

@@ -1,4 +1,4 @@
-# SDI Converter 2 (2.0.0.1)
+# SDI Converter 2 (2.0.0.2)
 
 Windows multichannel converter: Blackmagic SDI to OMT / NDI, and OMT / NDI to SDI.
 
@@ -9,8 +9,8 @@ This is the multichannel successor to SDI Converter.
 
 ## Installation (Windows x64)
 
-1. [Download the SDI Converter 2.0.0.1 installer](https://github.com/peteraellig/SDI_converter2/releases/download/v2.0.0.1/SDI-Converter2-Setup-2.0.0.1.exe).
-2. Run `SDI-Converter2-Setup-2.0.0.1.exe` and approve the administrator prompt. The installer includes the .NET and Visual C++ runtimes.
+1. [Download the SDI Converter 2.0.0.2 installer](https://github.com/peteraellig/SDI_converter2/releases/download/v2.0.0.2/SDI-Converter2-Setup-2.0.0.2.exe).
+2. Run `SDI-Converter2-Setup-2.0.0.2.exe` and approve the administrator prompt. The installer includes the .NET and Visual C++ runtimes.
 3. Install Blackmagic Desktop Video and, for NDI features, the free NDI Tools separately.
 
 ## Run

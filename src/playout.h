@@ -277,7 +277,12 @@ class Player : public IDeckLinkVideoOutputCallback_v14_2_1 {
     std::array<Slot, 12> slots;
     CComPtr<IDeckLinkOutput_v14_2_1> output;
     ModeInfo format;
+    // Two separate reserves, which used to add up (buffer B gave B-1 frames of source lag PLUS B frames queued on the card):
+    // - `bufferFrames` (the user's buffer setting) is the network reserve: the picture played is B-1 frames behind the newest received.
+    // - `cardFrames` is the output queue on the card. It only has to cover the engine thread's timing (it refills every 2 ms and on
+    //   each completed frame), so it is fixed at 2 frames.
     int bufferFrames;
+    static constexpr int cardFrames = 2;
     bool videoEnabled = false, audioEnabled = false, started = false, closed = false;
     std::atomic<bool> stopped{false};
     std::mutex wakeMutex;
@@ -357,7 +362,7 @@ public:
         check(output->GetBufferedVideoFrameCount(&pending), "Read output buffer");
         const int64_t period = frameTime(1, format);
         const double exactPeriod = 10000000.0 * format.rateD / format.rateN;
-        while (pending < static_cast<unsigned int>(bufferFrames)) {
+        while (pending < static_cast<unsigned int>(cardFrames)) {
             auto state = receiver.buffer.state();
             int64_t target = origin + std::llround(videoOffset);
             const bool signal = receiver.lastVideo > 0 && Capture::nowMs() - receiver.lastVideo < 500;
@@ -433,7 +438,7 @@ public:
         check(output->GetScheduledStreamTime(format.rateN, &streamTime, &speed), "Read SDI clock");
         const int64_t frame = streamTime / format.rateD;
         if (frame >= index) { // The card ran past what was scheduled: skip ahead and re-anchor.
-            index = frame + bufferFrames;
+            index = frame + cardFrames;
             anchor(receiver.buffer.state().last);
             ++resyncs;
         }

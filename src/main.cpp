@@ -162,12 +162,15 @@ void listDevices() {
         all[i]->QueryInterface(__uuidof(IDeckLinkInput_v14_2_1), reinterpret_cast<void**>(&input));
         bool locked = false;
         auto mode = detectedMode(all[i], input, locked);
+        // The driver only reports lock/mode for an input that some program has open. For an idle input the flag is always
+        // false, so "signal" is null (unknown) there instead of a misleading false.
+        const bool captureOpen = busyKnown && (busy & bmdDeviceCaptureBusy);
         std::cout << "{\"index\":" << i << ",\"name\":" << json(deviceName(all[i]))
                   << ",\"key\":" << json(deviceKey(all[i], static_cast<int>(i)))
                   << ",\"capture\":" << (capable(all[i], bmdDeviceSupportsCapture) ? "true" : "false")
                   << ",\"playback\":" << (capable(all[i], bmdDeviceSupportsPlayback) ? "true" : "false")
                   << ",\"busy\":" << (busyKnown ? std::to_string(busy) : "null")
-                  << ",\"signal\":" << (locked ? "true" : "false")
+                  << ",\"signal\":" << (!captureOpen ? "null" : locked ? "true" : "false")
                   << ",\"detectedMode\":" << (mode.empty() ? "null" : json(mode)) << '}';
     }
     std::cout << "]\n";
@@ -264,7 +267,7 @@ int main(int argc, char** argv) {
             probeOmt(argv[2], argc >= 4 ? std::stoi(argv[3]) : 0);
         else {
             std::cout << "sdi_converter engine\n"
-                         "  --list           devices, capabilities, busy state, detected input signal (JSON)\n"
+                         "  --list           devices, capabilities, busy state, input signal while an input is open, else null (JSON)\n"
                          "  --modes INDEX    modes the SDK reports for device INDEX, input and output (JSON)\n";
             if (argc > 1) result = 1;
         }
